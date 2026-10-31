@@ -39,7 +39,7 @@ async function generateWithOllama(description) {
   return plan;
 }
 
-async function generateWithGemini(description) {
+async function generateWithGemini(description, image = null) {
   const model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
     method: "POST",
@@ -48,7 +48,10 @@ async function generateWithGemini(description) {
       generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
       contents: [{
         role: "user",
-        parts: [{ text: `You are a cautious household repair assistant. Return only valid JSON with exactly these fields: problem (string), summary (string), clarifyingQuestions (array of strings), steps (array of objects with step number and instruction string), tools (array of objects with name, quantity number, reason), materials (array of objects with name and reason), safetyWarnings (array of strings), professionalHelpRecommended (boolean). Never invent marketplace listings, owners, prices, or availability. Recommend a qualified professional for electrical, gas, structural, roofing, or dangerous work. Repair description: ${description}` }],
+        parts: [
+          { text: `You are a cautious household repair assistant. Return only valid JSON with exactly these fields: problem (string), summary (string), clarifyingQuestions (array of strings), steps (array of objects with step number and instruction string), tools (array of objects with name, quantity number, reason), materials (array of objects with name and reason), safetyWarnings (array of strings), professionalHelpRecommended (boolean). Never invent marketplace listings, owners, prices, or availability. Use the attached photo as supplementary evidence, but clearly state uncertainty and do not identify people. Recommend a qualified professional for electrical, gas, structural, roofing, or dangerous work. Repair description: ${description}` },
+          ...(image ? [{ inlineData: { mimeType: image.match(/^data:(image\/[^;]+);base64,/)?.[1], data: image.replace(/^data:image\/[^;]+;base64,/, "") } }] : []),
+        ],
       }],
     }),
   });

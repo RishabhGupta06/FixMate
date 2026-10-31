@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 const API_URL = "http://localhost:5000/api";
@@ -6,6 +6,7 @@ const API_URL = "http://localhost:5000/api";
 function App() {
   const [view, setView] = useState("assistant");
   const [description, setDescription] = useState("I want to install a floating shelf on my wall");
+  const [problemImage, setProblemImage] = useState(null);
   const [plan, setPlan] = useState(null);
   const [planSource, setPlanSource] = useState("");
   const [tools, setTools] = useState([]);
@@ -20,6 +21,8 @@ function App() {
   const [afterAuthView, setAfterAuthView] = useState(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [locationStatus, setLocationStatus] = useState("requesting");
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
   const hasSession = Boolean(token && user);
 
   useEffect(() => {
@@ -47,12 +50,62 @@ function App() {
 
   const visibleTools = useMemo(() => tools.filter((tool) => `${tool.name} ${tool.category}`.toLowerCase().includes(search.toLowerCase())), [tools, search]);
 
+  function toggleVoiceInput() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setNotice("Voice input is not supported in this browser. Try Chrome or Edge.");
+      return;
+    }
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-IN";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onstart = () => {
+      setIsListening(true);
+      setNotice("Listening... describe the repair, then pause.");
+    };
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript.trim();
+      setDescription((current) => current && !current.startsWith("I want to install") ? `${current} ${transcript}` : transcript);
+      setNotice("Voice description added.");
+    };
+    recognition.onerror = (event) => setNotice(event.error === "not-allowed" ? "Microphone permission was denied." : "Could not understand the voice input. Please try again.");
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }
+
+  function handleImageChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setNotice("Please choose an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setNotice("Image must be 5 MB or smaller.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setProblemImage({ name: file.name, dataUrl: reader.result });
+    reader.onerror = () => setNotice("Could not read that image. Please try again.");
+    reader.readAsDataURL(file);
+  }
+
   async function generatePlan(event) {
     event.preventDefault();
     setLoading(true);
     setNotice("");
     try {
-      const response = await fetch(`${API_URL}/ai/repair-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description }), signal: AbortSignal.timeout(30000) });
+      const response = await fetch(`${API_URL}/ai/repair-plan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description, image: problemImage?.dataUrl || null }), signal: AbortSignal.timeout(30000) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message);
       setPlan(data.plan);
@@ -127,8 +180,13 @@ function App() {
                 <div className="trust-row"><span>✦ Powered by AI</span><span>◉ Real local listings</span><span>✓ Safety first</span></div>
               </div>
               <form className="repair-card" onSubmit={generatePlan}>
-                <div className="card-heading"><span className="sparkle">✦</span><div><h2>What needs fixing?</h2><p>Tell us what’s going on. Photos coming soon.</p></div></div>
-                <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. My kitchen tap is leaking..." />
+                <div className="card-heading"><span className="sparkle">✦</span><div><h2>What needs fixing?</h2><p>Tell us what’s going on, or add a photo.</p></div></div>
+                <div className="description-input"><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. My kitchen tap is leaking..." /><button type="button" className={`voice-button ${isListening ? "listening" : ""}`} onClick={toggleVoiceInput} aria-label={isListening ? "Stop voice input" : "Start voice input"}>{isListening ? "■" : "🎙"}</button></div>
+                <div className="photo-upload">
+                  <label htmlFor="problem-photo" className="photo-button">📷 Add a photo</label>
+                  <input id="problem-photo" type="file" accept="image/*" onChange={handleImageChange} />
+                  {problemImage && <div className="photo-preview"><img src={problemImage.dataUrl} alt="Repair problem preview" /><span>{problemImage.name}</span><button type="button" onClick={() => setProblemImage(null)} aria-label="Remove photo">×</button></div>}
+                </div>
                 <div className="suggestions"><span>Try an example:</span><button type="button" onClick={() => setDescription("My kitchen tap is leaking at the base")}>Leaking tap</button><button type="button" onClick={() => setDescription("I want to install a shelf on a brick wall")}>Install a shelf</button></div>
                 <button className="primary-button" disabled={loading}>{loading ? "Thinking..." : "Build my repair plan  →"}</button>
                 {notice && <p className="notice">{notice}</p>}

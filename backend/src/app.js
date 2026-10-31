@@ -39,7 +39,7 @@ async function seedToolsIfEmpty() {
 app.use(cors());
 app.use(helmet());
 app.use(morgan("dev"));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "8mb" }));
 
 function signUser(user) { return jwt.sign({ id: String(user._id || user.id), email: user.email, name: user.name }, JWT_SECRET, { expiresIn: "7d" }); }
 function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -101,9 +101,12 @@ app.post("/api/ai/repair-plan", async (req, res, next) => {
   try {
     const description = typeof req.body.description === "string" ? req.body.description.trim() : "";
     if (description.length < 8) return res.status(400).json({ message: "Please describe the repair in at least 8 characters." });
+    const image = typeof req.body.image === "string" ? req.body.image : null;
+    if (image && !/^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(image)) return res.status(400).json({ message: "Please upload a valid JPG, PNG, WEBP, or GIF image." });
+    if (image && image.length > 7 * 1024 * 1024) return res.status(413).json({ message: "Image must be 5 MB or smaller." });
     if (process.env.AI_PROVIDER === "gemini" && process.env.GEMINI_API_KEY) {
       try {
-        const plan = await generateWithGemini(description);
+        const plan = await generateWithGemini(description, image);
         return res.json({ plan, source: "Gemini API" });
       } catch (error) {
         console.warn(`Gemini unavailable; using local safety fallback: ${error.message}`);
